@@ -19,13 +19,18 @@ func main() {
 
 	app := fiber.New()
 	app.Use(cors.New(cors.Config{
-		AllowOrigins: "http://localhost:3000",
-		AllowHeaders: "Origin, Content-Type, Accept",
+		AllowOrigins:     "http://localhost:3000",
+		AllowHeaders:     "Origin, Content-Type, Accept, userid, token",
+		AllowMethods:     "POST, GET, PATCH, PUT, DELETE, OPTIONS",
+		AllowCredentials: true,
+		ExposeHeaders:    "",
+		MaxAge:           3600,
 	}))
 
 	app.Post("/login", api.LoginHandler)
 	app.Post("/register", api.RegisterHandler)
 	app.Post("/upload", api.FileHandler)
+	app.Post("/save", api.SaveHandler)
 
 	// Graceful shutdown
 	c := make(chan os.Signal, 1)

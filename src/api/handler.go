@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"time"
@@ -31,7 +32,7 @@ func LoginHandler(c *fiber.Ctx) error {
 		fmt.Println(err)
 		return err
 	}
-	token, err := LoginUser(login.Loginid, login.Password)
+	token, userid, err := LoginUser(login.Loginid, login.Password)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"message": "Error logging in!!",
@@ -41,6 +42,7 @@ func LoginHandler(c *fiber.Ctx) error {
 		"status": "success",
 		"code":   200,
 		"token":  token,
+		"userid": userid,
 	})
 }
 
@@ -78,6 +80,17 @@ func RegisterHandler(c *fiber.Ctx) error {
 }
 
 func FileHandler(c *fiber.Ctx) error {
+	// verify token and userid
+	token := c.Get("token")
+	userid := c.Get("userid")
+	isValid, err := Verify(token, userid)
+	if err != nil {
+		return err
+	}
+	if !isValid {
+		return c.Status(fiber.StatusUnauthorized).SendString("Unauthorized")
+	}
+
 	file, err := c.FormFile("file")
 	if err != nil {
 		return err
@@ -94,7 +107,7 @@ func FileHandler(c *fiber.Ctx) error {
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).SendString("Failed to read file content")
 	}
-	SaveFile(fileContent, file.Filename)
+	SaveFile(fileContent, file.Filename, userid)
 
 	now := time.Now()
 	file_name := now.Format("20060102150405") + "_" + file.Filename
@@ -104,4 +117,41 @@ func FileHandler(c *fiber.Ctx) error {
 		return err
 	}
 	return nil
+}
+
+func SaveHandler(c *fiber.Ctx) error {
+	// verify token and userid
+	token := c.Get("token")
+	userid := c.Get("userid")
+	isValid, err := Verify(token, userid)
+	if err != nil {
+		return err
+	}
+	if !isValid {
+		return c.Status(fiber.StatusUnauthorized).SendString("Unauthorized")
+	}
+
+	var data []interface{}
+	if err := c.BodyParser(&data); err != nil {
+		fmt.Println(err)
+		return err
+	}
+
+	var buffer bytes.Buffer
+	for _, v := range data {
+		buffer.WriteString(fmt.Sprintf("%v", v))
+	}
+
+	byteData := buffer.Bytes()
+
+	// Save the file to the server
+	file_name := time.Now().Format("20060102150405")
+	err = SaveFile(byteData, file_name, userid)
+	if err != nil {
+		fmt.Println(err)
+		return c.Status(fiber.StatusInternalServerError).SendString(err.Error())
+	}
+	return c.JSON(fiber.Map{
+		"message": "File saved successfully",
+	})
 }

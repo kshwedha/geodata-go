@@ -61,12 +61,12 @@ func RegisterUser(username string, password string, email string) error {
 	return fmt.Errorf("!! could not register user")
 }
 
-func LoginUser(loginid string, password string) (string, error) {
+func LoginUser(loginid string, password string) (string, string, error) {
 	if loginid == "" || password == "" {
-		return "", fmt.Errorf("username or password cannot be empty")
+		return "", "", fmt.Errorf("username or password cannot be empty")
 	}
 	if DoesExists("username", loginid) && DoesExists("email", loginid) {
-		return "", fmt.Errorf("user does not exist")
+		return "", "", fmt.Errorf("user does not exist")
 	}
 	hash := md5.New()
 	hash.Write([]byte(password))
@@ -74,7 +74,7 @@ func LoginUser(loginid string, password string) (string, error) {
 	query := fmt.Sprintf("select count(*) from users where username='%s' and password='%s' limit 1;", loginid, password)
 	conn, err := db.InitDB()
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	results := db.ExecPsqlRows(conn, query)
 	for results.Next() {
@@ -82,18 +82,18 @@ func LoginUser(loginid string, password string) (string, error) {
 		err := results.Scan(&count)
 		if err != nil {
 			fmt.Println(err)
-			return "", err
+			return "", "", err
 		}
 		if count > 0 {
-			token, err := CreateSession(loginid)
+			token, userid, err := CreateSession(loginid)
 			if err != nil {
 				fmt.Println(err)
-				return "", err
+				return "", "", err
 			}
-			return token, nil
+			return token, userid, nil
 		}
 	}
-	return "!! ", fmt.Errorf("invalid username or password")
+	return "", "", fmt.Errorf("invalid username or password")
 }
 
 func getUserID(loginid string) (string, error) {
@@ -134,30 +134,30 @@ func checkExistingSession(userid string) (bool, string) {
 	return false, ""
 }
 
-func CreateSession(loginid string) (string, error) {
+func CreateSession(loginid string) (string, string, error) {
 	userid, _ := getUserID(loginid)
 	if userid == "0" {
-		return "", fmt.Errorf("user does not exist")
+		return "", userid, fmt.Errorf("user does not exist")
 	}
 	exists, etoken := checkExistingSession(userid)
 	if exists {
-		return etoken, nil
+		return etoken, userid, nil
 	}
 	token, err := generateSessionToken(128)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	query := fmt.Sprintf("insert into sessions (user_id, session_token, expiration_time) values ('%s', '%s', CURRENT_TIMESTAMP + INTERVAL '7 days');", userid, token)
 	conn, err := db.InitDB()
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	_, err = db.ExecPsqlResult(conn, query)
 	if err != nil {
 		fmt.Println(err)
-		return "", err
+		return "", "", err
 	}
-	return token, nil
+	return token, userid, nil
 }
 
 func generateSessionToken(length int) (string, error) {
@@ -174,16 +174,35 @@ func generateSessionToken(length int) (string, error) {
 	return hex.EncodeToString(token), nil
 }
 
-func SaveFile(file []byte, file_name string) error {
-	query := fmt.Sprintf("insert into files (filename, file_content) values ('%s', '%s');", file_name, file)
+func SaveFile(file []byte, file_name string, userid string) error {
+	query := fmt.Sprintf("insert into files (filename, file_content, user_id) values ('%s', '%s', '%s');", file_name, file, userid)
 	conn, err := db.InitDB()
 	if err != nil {
 		return err
 	}
 	_, err = db.ExecPsqlResult(conn, query)
 	if err != nil {
-		fmt.Println(err)
 		return err
 	}
 	return nil
+}
+
+func Verify(token string, userid string) (bool, error) {
+	query := fmt.Sprintf("select count(*) from sessions where user_id='%s' and session_token='%s' and expiration_time > CURRENT_TIMESTAMP;", userid, token)
+	conn, err := db.InitDB()
+	if err != nil {
+		return false, err
+	}
+	results := db.ExecPsqlRows(conn, query)
+	for results.Next() {
+		var token string
+		err := results.Scan(&token)
+		if err != nil {
+			return false, fmt.Errorf("session doesn't exist or has expired")
+		}
+		if len(token) > 0 {
+			return true, nil
+		}
+	}
+	return false, fmt.Errorf("token doesn't exists or has expired")
 }
